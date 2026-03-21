@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LinkPulse</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #111; padding: 2rem; }
+    h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .subtitle { font-size: 0.85rem; color: #666; margin-bottom: 1.5rem; }
+    .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #16a34a; margin-right: 6px; animation: pulse 1.4s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 1.5rem; }
+    .metric { background: white; border-radius: 10px; padding: 1rem; border: 1px solid #e5e5e5; }
+    .metric-label { font-size: 0.75rem; color: #888; margin-bottom: 4px; }
+    .metric-val { font-size: 1.6rem; font-weight: 600; }
+    .green { color: #16a34a; } .red { color: #dc2626; } .amber { color: #d97706; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; border: 1px solid #e5e5e5; margin-bottom: 1.5rem; }
+    th { font-size: 0.75rem; color: #888; text-align: left; padding: 10px 14px; border-bottom: 1px solid #e5e5e5; }
+    td { padding: 10px 14px; font-size: 0.85rem; border-bottom: 1px solid #f0f0f0; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
+    .badge-up { background: #dcfce7; color: #166534; }
+    .badge-down { background: #fee2e2; color: #991b1b; }
+    .badge-slow { background: #fef3c7; color: #92400e; }
+    .feed-box { background: white; border-radius: 10px; border: 1px solid #e5e5e5; padding: 1rem; margin-bottom: 1.5rem; }
+    .feed-label { font-size: 0.75rem; color: #888; margin-bottom: 8px; }
+    .feed { font-family: monospace; font-size: 0.8rem; display: flex; flex-direction: column; gap: 4px; }
+    .feed-row { display: flex; gap: 10px; }
+    .feed-time { color: #aaa; min-width: 90px; }
+    .feed-ok { color: #16a34a; }
+    .feed-err { color: #dc2626; }
+    .add-bar { display: flex; gap: 8px; }
+    .add-bar input { flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid #ddd; font-size: 0.9rem; }
+    .add-bar button { padding: 8px 18px; border-radius: 8px; border: none; background: #111; color: white; font-size: 0.9rem; cursor: pointer; }
+    .add-bar button:hover { background: #333; }
+  </style>
+</head>
+<body>
+  <h1><span class="live-dot"></span>LinkPulse</h1>
+  <p class="subtitle">Real-time URL monitor — powered by Aiven Valkey</p>
+
+  <div class="metrics">
+    <div class="metric"><div class="metric-label">URLs monitored</div><div class="metric-val" id="m-total">—</div></div>
+    <div class="metric"><div class="metric-label">Online now</div><div class="metric-val green" id="m-up">—</div></div>
+    <div class="metric"><div class="metric-label">Down now</div><div class="metric-val red" id="m-down">—</div></div>
+    <div class="metric"><div class="metric-label">Avg response</div><div class="metric-val amber" id="m-avg">—</div></div>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>URL</th><th>Status</th><th>Response time</th><th>Uptime %</th><th>Last checked</th>
+    </tr></thead>
+    <tbody id="url-body"></tbody>
+  </table>
+
+  <div class="feed-box">
+    <div class="feed-label">Live event feed (Valkey pub/sub → SSE)</div>
+    <div class="feed" id="feed"></div>
+  </div>
+
+  <div class="add-bar">
+    <input id="url-input" placeholder="https://yoursite.com" />
+    <button onclick="addUrl()">+ Add URL</button>
+  </div>
+
+  <script>
+    async function loadStatus() {
+      const res = await fetch('/status');
+      const data = await res.json();
+      const tbody = document.getElementById('url-body');
+      tbody.innerHTML = '';
+      let upCount = 0, downCount = 0, totalMs = 0, msCount = 0;
+      data.forEach(u => {
+        if (u.status === 'up') upCount++;
+        if (u.status === 'down') downCount++;
+        if (u.ms && u.ms > 0) { totalMs += parseInt(u.ms); msCount++; }
+        const row = document.createElement('tr');
+        const badgeClass = u.status === 'up' ? 'badge-up' : u.status === 'down' ? 'badge-down' : 'badge-slow';
+        const time = u.checkedAt ? new Date(u.checkedAt).toLocaleTimeString() : '—';
+        const uptime = u.uptime ? u.uptime + '%' : '—';
+        row.innerHTML = `
+          <td style="font-family:monospace">${u.url}</td>
+          <td><span class="badge ${badgeClass}">${(u.status||'—').toUpperCase()}</span></td>
+          <td>${u.ms && u.ms > 0 ? u.ms + 'ms' : '—'}</td>
+          <td>${uptime}</td>
+          <td>${time}</td>`;
+        tbody.appendChild(row);
+      });
+      document.getElementById('m-total').textContent = data.length;
+      document.getElementById('m-up').textContent = upCount;
+      document.getElementById('m-down').textContent = downCount;
+      document.getElementById('m-avg').textContent = msCount ? Math.round(totalMs / msCount) + 'ms' : '—';
+    }
+
+    function addFeedRow(data) {
+      const feed = document.getElementById('feed');
+      const row = document.createElement('div');
+      row.className = 'feed-row';
+      const t = new Date(data.checkedAt).toLocaleTimeString();
+      const ok = data.status !== 'down';
+      row.innerHTML = `<span class="feed-time">${t}</span><span class="${ok ? 'feed-ok' : 'feed-err'}">${data.url} → ${ok ? '200 OK' : 'timeout'}</span><span style="margin-left:auto;color:#aaa">${data.ms > 0 ? data.ms + 'ms' : '—'}</span>`;
+      feed.insertBefore(row, feed.firstChild);
+      if (feed.children.length > 8) feed.removeChild(feed.lastChild);
+    }
+
+    async function addUrl() {
+      const input = document.getElementById('url-input');
+      const url = input.value.trim();
+      if (!url.startsWith('http')) return alert('URL must start with http');
+      await fetch('/urls', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+      input.value = '';
+      setTimeout(loadStatus, 1000);
+    }
+
+    const evtSource = new EventSource('/events');
+    evtSource.onmessage = (e) => {
+      const data = JSON.parse(e.data);
+      addFeedRow(data);
+      loadStatus();
+    };
+
+    loadStatus();
+    setInterval(loadStatus, 30000);
+  </script>
+</body>
+</html>
