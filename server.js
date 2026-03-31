@@ -1,4 +1,4 @@
-  require("dotenv").config({ override: false });
+require("dotenv").config({ override: false });
 const express = require("express");
 const valkey = require("./valkey");
 const { startPinger, pingUrl } = require("./pinger");
